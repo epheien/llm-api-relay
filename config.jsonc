@@ -11,6 +11,12 @@
   // 针对不同“入参 model”的参数覆写规则（精确匹配）
   "model_rules": [
     {
+      "match_model": "gpt-oss-120b",
+      "set": {
+        "reasoning_effort": "high"
+      }
+    },
+    {
       "match_model": "gpt-oss",
       "set": {
         // 可选：把外部 model 映射为 LMDeploy 实际加载的 model 名
