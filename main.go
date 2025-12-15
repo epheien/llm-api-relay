@@ -30,11 +30,28 @@ type ModelRule struct {
 	Unset      []string       `json:"unset"`       // remove fields at top-level
 }
 
+var verboseMode bool
+
+// verbose mode helper function
+func vlog(format string, args ...any) {
+	if verboseMode {
+		log.Printf(format, args...)
+	}
+}
+
 func main() {
 	var configPath string
+	var verbose bool
 	flag.StringVar(&configPath, "config", "config.jsonc", "path to jsonc config")
 	flag.StringVar(&configPath, "c", "config.jsonc", "path to jsonc config")
+	flag.BoolVar(&verbose, "v", false, "verbose mode - print operation details")
+	flag.BoolVar(&verbose, "verbose", false, "verbose mode - print operation details")
 	flag.Parse()
+
+	verboseMode = verbose
+	if verboseMode {
+		log.Printf("verbose mode enabled")
+	}
 
 	cfg, err := loadConfigJSONC(configPath)
 	if err != nil {
@@ -185,21 +202,33 @@ func stripJSONC(s string) string {
 
 func applyRules(cfg *Config, req map[string]any) {
 	model := getString(req, "model")
+
+	vlog("RULE: processing model '%s'", model)
+
 	rule := findRule(cfg.ModelRules, model)
 	if rule == nil {
+		vlog("RULE: no exact match for '%s', trying 'default'", model)
 		rule = findRule(cfg.ModelRules, "default")
 	}
+
 	if rule == nil {
+		vlog("RULE: no rule found for model '%s', applying no changes", model)
 		return
 	}
 
+	vlog("RULE: matched rule '%s', applying transformations", rule.MatchModel)
+	vlog("RULE: rule operations - unset: %d fields, set: %d fields, extra: %d fields",
+		len(rule.Unset), len(rule.Set), len(rule.Extra))
+
 	// unset first
 	for _, k := range rule.Unset {
+		vlog("RULE: removing field '%s'", k)
 		delete(req, k)
 	}
 
 	// set top-level
 	for k, v := range rule.Set {
+		vlog("RULE: setting '%s' = %v", k, v)
 		req[k] = v
 	}
 
@@ -211,9 +240,12 @@ func applyRules(cfg *Config, req map[string]any) {
 			req["extra"] = extra
 		}
 		for k, v := range rule.Extra {
+			vlog("RULE: adding to extra '%s' = %v", k, v)
 			extra[k] = v
 		}
 	}
+
+	vlog("RULE: transformation complete for model '%s'", model)
 }
 
 func findRule(rules []ModelRule, model string) *ModelRule {
