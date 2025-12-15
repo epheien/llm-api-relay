@@ -1,0 +1,40 @@
+{
+  // 监听地址（对外提供 OpenAI 兼容 API）
+  "listen": "0.0.0.0:8080",
+
+  // LMDeploy api_server 地址（例如：lmdeploy serve api_server ... --server-port 23333）
+  "upstream": "http://192.168.3.244:8000",
+
+  // 可选：把外部传来的 Authorization: Bearer xxx 原样转发
+  "forward_auth": true,
+
+  // 针对不同“入参 model”的参数覆写规则（精确匹配）
+  "model_rules": [
+    {
+      "match_model": "gpt-oss",
+      "set": {
+        // 可选：把外部 model 映射为 LMDeploy 实际加载的 model 名
+        "model": "internlm/internlm2_5-7b-chat",
+
+        // 常规采样参数覆写
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": 1024
+      },
+      "extra": {
+        // 你说的“推理强度”，这里用一个通用字段承载
+        // 具体字段名要看你后端（或你自己在后端做二次解析）认哪个
+        "inference_strength": "high"
+      },
+      "unset": ["logprobs"] // 删除某些字段，避免下游不支持
+    },
+
+    {
+      "match_model": "default",
+      "set": {
+        "temperature": 0.7,
+        "top_p": 0.95
+      }
+    }
+  ]
+}
