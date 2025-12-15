@@ -104,7 +104,7 @@ POST /v1/completions
 
 **Health Check**
 ```
-GET /healthz
+GET /health
 ```
 - Returns "ok" - used for monitoring
 
@@ -233,7 +233,7 @@ Remove unsupported parameters for certain models:
 go run main.go --config config.jsonc
 
 # Test health endpoint
-curl http://localhost:8080/healthz
+curl http://localhost:8080/health
 
 # Test models endpoint
 curl http://localhost:8080/v1/models
