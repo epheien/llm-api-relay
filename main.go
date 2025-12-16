@@ -42,11 +42,17 @@ func vlog(format string, args ...any) {
 func main() {
 	var configPath string
 	var verbose bool
-	flag.StringVar(&configPath, "config", "config.jsonc", "path to jsonc config")
-	flag.StringVar(&configPath, "c", "config.jsonc", "path to jsonc config")
+	flag.StringVar(&configPath, "config", "", "path to jsonc config")
+	flag.StringVar(&configPath, "c", "", "path to jsonc config")
 	flag.BoolVar(&verbose, "v", false, "verbose mode - print operation details")
 	flag.BoolVar(&verbose, "verbose", false, "verbose mode - print operation details")
 	flag.Parse()
+
+	// Require config parameter
+	if configPath == "" {
+		fmt.Printf("Usage: %s --config <config.jsonc>\n", os.Args[0])
+		return
+	}
 
 	verboseMode = verbose
 	if verboseMode {
