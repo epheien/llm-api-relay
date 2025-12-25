@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strings"
 
@@ -236,10 +237,21 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 	parsed, err := parseToolCallXML(buffered)
 	if err != nil {
 		// If parsing fails, return as regular content
+		log.Printf("TOOLCALLFIX: failed to parse tool call (invalid XML format), returning as regular content: %v", err)
 		chunk := t.createContentChunk(buffered, nil)
 		jsonBytes, _ := json.Marshal(chunk)
 		return []string{fmt.Sprintf("data: %s", jsonBytes)}, nil
 	}
+
+	// Format arguments for logging
+	argsStr := ""
+	for i, arg := range parsed.Args {
+		if i > 0 {
+			argsStr += ", "
+		}
+		argsStr += fmt.Sprintf("%s=%s", arg.Key, arg.Value)
+	}
+	log.Printf("TOOLCALLFIX: successfully transformed tool call - name: %s, arguments: [%s]", parsed.Name, argsStr)
 
 	// Create the tool call chunk
 	toolCallChunk := t.createToolCallChunk(parsed)

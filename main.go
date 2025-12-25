@@ -439,6 +439,7 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 			_, _ = io.Copy(w, resp.Body)
 			return
 		}
+		vlog("TOOLCALLFIX: transformation completed successfully for model '%s'", model)
 		flusher.Flush()
 		return
 	}
