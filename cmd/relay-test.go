@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
@@ -330,23 +331,61 @@ func testChatCompletionsStreaming() TestResult {
 	}
 
 	if resp.StatusCode == http.StatusOK {
-		// 读取部分响应，检查是否为流格式
-		content, _ := io.ReadAll(io.LimitReader(resp.Body, 1000)) // 读取前 1000 字节
-		contentStr := string(content)
+		// 使用逐行读取实现真正的流模式
+		reader := bufio.NewReader(resp.Body)
+		lineCount := 0
+		detectedStream := false
 
 		if verboseMode {
-			fmt.Printf("   📝 流内容(前 %d 字节):\n%s\n", len(contentStr), contentStr)
+			fmt.Println("   📝 流内容 (实时输出):")
 		}
 
-		// 流模式响应包含多个 JSON 对象，每行一个
-		lineCount := strings.Count(contentStr, "\n")
+		// 逐行读取流数据
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				if verboseMode {
+					fmt.Printf("   ⚠️ 读取错误: %v\n", err)
+				}
+				break
+			}
 
-		if strings.Contains(contentStr, `data: `) && lineCount > 1 {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			lineCount++
+
+			// 检测是否为流数据
+			if strings.HasPrefix(line, "data: ") {
+				detectedStream = true
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					if verboseMode {
+						fmt.Println("   📝 [流结束]")
+					}
+					break
+				}
+			}
+
+			// 在详细模式下输出流内容
+			if verboseMode && line != "" {
+				fmt.Printf("   %s\n", line)
+			} else if !verboseMode && lineCount <= 3 { // 非详细模式下只显示前几行
+				fmt.Printf("   %s\n", line)
+			}
+		}
+
+		if detectedStream && lineCount > 1 {
 			return TestResult{
 				Name:    "Chat Completions (流)",
 				Success: true,
 				Message: "正常",
-				Details: fmt.Sprintf("状态码: %d, 前 %d 字节包含 %d 行, 耗时: %v", resp.StatusCode, len(contentStr), lineCount+1, duration),
+				Details: fmt.Sprintf("状态码: %d, 处理 %d 行流数据, 耗时: %v", resp.StatusCode, lineCount, duration),
 			}
 		}
 
@@ -355,7 +394,7 @@ func testChatCompletionsStreaming() TestResult {
 			Name:    "Chat Completions (流)",
 			Success: true,
 			Message: "正常 (流检测可能不准确)",
-			Details: fmt.Sprintf("状态码: %d, 响应长度: %d 字节, 耗时: %v", resp.StatusCode, len(contentStr), duration),
+			Details: fmt.Sprintf("状态码: %d, 处理 %d 行数据, 耗时: %v", resp.StatusCode, lineCount, duration),
 		}
 	}
 
