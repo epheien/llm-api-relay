@@ -14,6 +14,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"llm-api-relay/toolcallfix"
 )
 
 type Config struct {
@@ -24,10 +26,11 @@ type Config struct {
 }
 
 type ModelRule struct {
-	MatchModel string         `json:"match_model"` // exact match; use "default" as fallback
-	Set        map[string]any `json:"set"`         // overwrite/add fields at top-level
-	Extra      map[string]any `json:"extra"`       // merge into request["extra"] (object)
-	Unset      []string       `json:"unset"`       // remove fields at top-level
+	MatchModel        string         `json:"match_model"`        // exact match; use "default" as fallback
+	Set               map[string]any `json:"set"`                // overwrite/add fields at top-level
+	Extra             map[string]any `json:"extra"`              // merge into request["extra"] (object)
+	Unset             []string       `json:"unset"`              // remove fields at top-level
+	EnableToolCallFix bool           `json:"enable_toolcallfix"` // enable/disable toolcallfix per model
 }
 
 var verboseMode bool
@@ -81,11 +84,11 @@ func main() {
 	}
 
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, patcher)
+		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, cfg, patcher)
 	})
 
 	mux.HandleFunc("/v1/completions", func(w http.ResponseWriter, r *http.Request) {
-		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, patcher)
+		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, cfg, patcher)
 	})
 
 	// health
@@ -274,6 +277,26 @@ func getString(m map[string]any, key string) string {
 	return ""
 }
 
+// shouldEnableToolCallFix determines whether to enable toolcallfix for a given model
+func shouldEnableToolCallFix(cfg *Config, model string) bool {
+	// Find exact match rule
+	rule := findRule(cfg.ModelRules, model)
+	if rule == nil {
+		// Try default rule as fallback
+		vlog("TOOLCALLFIX: no exact match for '%s', trying 'default'", model)
+		rule = findRule(cfg.ModelRules, "default")
+	}
+
+	if rule != nil {
+		vlog("TOOLCALLFIX: using rule '%s': enable=%v", rule.MatchModel, rule.EnableToolCallFix)
+		return rule.EnableToolCallFix
+	}
+
+	// Default to disabled (no rule found for this model)
+	vlog("TOOLCALLFIX: no rule found for '%s', defaulting to disabled", model)
+	return false
+}
+
 // proxyPassthrough forwards request to upstream (no body patch).
 func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL, forwardAuth bool, newBody io.Reader) {
 	target := upstream.ResolveReference(r.URL)
@@ -320,7 +343,7 @@ func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL,
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.URL, forwardAuth bool, patch func(map[string]any)) {
+func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.URL, forwardAuth bool, cfg *Config, patch func(map[string]any)) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -394,6 +417,12 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 		return
 	}
 
+	// Extract model name for toolcallfix decision
+	model := getString(payload, "model")
+
+	// Check if toolcallfix should be enabled for this model
+	enableToolCallFix := shouldEnableToolCallFix(cfg, model)
+
 	// streaming: copy line by line (works for SSE) but still safe for chunked bytes
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -402,6 +431,19 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 		return
 	}
 
+	if enableToolCallFix {
+		vlog("TOOLCALLFIX: transforming stream for model '%s'", model)
+		if err := toolcallfix.TransformStream(resp.Body, w); err != nil {
+			vlog("TOOLCALLFIX: transformation failed: %v", err)
+			// Fallback to direct stream copy
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+		flusher.Flush()
+		return
+	}
+
+	// Original streaming logic without toolcallfix
 	reader := bufio.NewReader(resp.Body)
 	for {
 		chunk, err := reader.ReadBytes('\n')
