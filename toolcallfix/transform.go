@@ -31,9 +31,9 @@ type Choice struct {
 }
 
 type Delta struct {
-	Content          string      `json:"content"`
-	ReasoningContent *string     `json:"reasoning_content"`
-	ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+	Content          string     `json:"content"`
+	ReasoningContent *string    `json:"reasoning_content"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type ToolCall struct {
@@ -98,23 +98,23 @@ func parseToolCallXML(xml string) (*ParsedToolCall, error) {
 	var argsSection string
 
 	if argKeyIndex == -1 {
-		name = inner
+		name = strings.TrimSpace(inner)
 		argsSection = ""
 	} else {
 		name = strings.TrimSpace(inner[:argKeyIndex])
 		argsSection = inner[argKeyIndex:]
 	}
 
-	// Parse arguments
+	// Parse arguments using (?s) flag to allow . to match newlines
 	var args []ToolCallArg
-	argKeyRe := regexp.MustCompile(`<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>`)
+	argKeyRe := regexp.MustCompile(`(?s)<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>`)
 	matches := argKeyRe.FindAllStringSubmatch(argsSection, -1)
 
 	for _, match := range matches {
 		if len(match) == 3 {
 			args = append(args, ToolCallArg{
-				Key:   match[1],
-				Value: match[2],
+				Key:   strings.TrimSpace(match[1]), // 键名可以 TrimSpace
+				Value: match[2],                    // 值保持原样
 			})
 		}
 	}
