@@ -24,6 +24,10 @@ help:
 	@echo "  test           - 运行所有测试"
 	@echo "  test-unit      - 运行单元测试"
 	@echo "  test-integration - 运行集成测试"
+	@echo "  test-coverage  - 运行测试并生成覆盖率报告"
+	@echo "  test-race      - 运行竞态条件检测"
+	@echo "  test-bench     - 运行性能测试"
+	@echo "  test-all       - 运行完整测试套件（包含覆盖率和竞态检测）"
 	@echo "  lint           - 代码规范检查"
 	@echo "  fmt            - 格式化代码"
 	@echo "  vet            - 代码静态分析"
@@ -36,6 +40,9 @@ help:
 	@echo "使用示例:"
 	@echo "  make build          # 构建所有二进制"
 	@echo "  make test           # 运行所有测试"
+	@echo "  make test-coverage  # 运行测试并查看覆盖率"
+	@echo "  make test-race      # 运行竞态条件检测"
+	@echo "  make test-all       # 运行完整测试套件"
 	@echo "  make all            # 完整构建和测试"
 
 # 创建二进制目录
@@ -81,19 +88,51 @@ clean:
 # 运行所有测试
 .PHONY: test
 test: test-unit test-integration
+	@echo ""
+	@echo "✓ 所有测试运行完成!"
 
 # 运行单元测试
 .PHONY: test-unit
 test-unit:
 	@echo "运行单元测试..."
-	go test -v ./main_test.go ./main.go
-	go test -v ./toolcallfix/...
+	go test -v .  # 测试主包
+	go test -v ./toolcallfix/...  # 测试 toolcallfix 包
 
 # 运行集成测试
 .PHONY: test-integration
 test-integration:
 	@echo "运行集成测试..."
-	go test -v ./toolcallfix_integration_test.go ./main.go ./toolcallfix_integration_test.go
+	go test -v -run "TestToolCallFixIntegration" .
+
+# 运行带覆盖率的测试
+.PHONY: test-coverage
+test-coverage:
+	@echo "运行测试并生成覆盖率报告..."
+	go test -coverprofile=coverage.out . ./toolcallfix
+	go tool cover -func=coverage.out
+	@echo ""
+	@echo "生成HTML覆盖率报告: coverage.html"
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "✓ 覆盖率报告生成完成"
+
+# 运行竞态条件检测
+.PHONY: test-race
+test-race:
+	@echo "运行竞态条件检测..."
+	go test -race -run "^Test[^I]" .  # 排除集成测试
+	go test -race ./toolcallfix/...
+
+# 运行性能测试
+.PHONY: test-bench
+test-bench:
+	@echo "运行性能测试..."
+	go test -bench=. -benchmem . ./toolcallfix
+
+# 运行所有测试（完整版）
+.PHONY: test-all
+test-all: test test-coverage test-race
+	@echo ""
+	@echo "🎉 完整测试套件运行完成!"
 
 # 代码规范检查
 .PHONY: lint

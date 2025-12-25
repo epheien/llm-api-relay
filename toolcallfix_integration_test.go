@@ -1,17 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"llm-api-relay/toolcallfix"
 )
 
 // TestToolCallFixIntegration tests the complete toolcallfix integration
@@ -33,17 +38,16 @@ func TestToolCallFixIntegration(t *testing.T) {
 			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"Let me search for that information.","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
 			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"` + "\n" + `</think>` + "\n" + `","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
 			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"<tool_call>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
 			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"search","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"<arg_key>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
 			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"query","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"test search","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
-			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"</arg_key>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"<arg_value>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"test query","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"</arg_value>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"</tool_call>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
+			`data: {"id":"test-123","object":"chat.completion.chunk","created":1234567890,"model":"test-model","choices":[{"index":0,"delta":{"content":"\nHere are the search results.","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}`,
 			`data: [DONE]`,
 		}
 
@@ -65,7 +69,7 @@ func TestToolCallFixIntegration(t *testing.T) {
 	defer os.Remove(configFile.Name())
 
 	configContent := fmt.Sprintf(`{
-  "listen": "127.0.0.1:0",
+  "listen": "127.0.0.1:8080",
   "upstream": "%s",
   "forward_auth": false,
   "model_rules": [
@@ -85,10 +89,140 @@ func TestToolCallFixIntegration(t *testing.T) {
 	}
 	configFile.Close()
 
+	// Build the main binary
+	cmd := exec.Command("go", "build", "-o", "test-relay", ".")
+	cmd.Dir = "."
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to build main binary: %v", err)
+	}
+	defer os.Remove("test-relay")
+
 	// Start the relay server with test config
-	// Note: In a real integration test, we'd start the server and make HTTP requests
-	// For simplicity, we'll test the core functions
-	t.Skip("Integration test requires full server startup - implemented as unit tests in toolcallfix package")
+	serverCmd := exec.Command("./test-relay", "--config", configFile.Name())
+
+	// Start the server process
+	if err := serverCmd.Start(); err != nil {
+		t.Fatalf("failed to start relay server: %v", err)
+	}
+	defer serverCmd.Process.Kill() // Force kill on cleanup
+
+	// Wait for server to start
+	time.Sleep(500 * time.Millisecond)
+
+	// Check if server is still running
+	if serverCmd.ProcessState != nil && serverCmd.ProcessState.Exited() {
+		output, _ := serverCmd.CombinedOutput()
+		t.Fatalf("relay server failed to start: %s", string(output))
+	}
+
+	// Wait a bit longer for server to be ready
+	time.Sleep(1 * time.Second)
+
+	// Test health endpoint first
+	client := &http.Client{Timeout: 5 * time.Second}
+	healthResp, err := client.Get("http://127.0.0.1:8080/health")
+	if err != nil {
+		t.Fatalf("server health check failed: %v", err)
+	}
+	healthResp.Body.Close()
+
+	// For this integration test, we'll test by making HTTP requests to the actual server
+	// Create a POST request with streaming enabled
+	reqBody := map[string]any{
+		"model":    "test-model",
+		"messages": []map[string]string{{"role": "user", "content": "search for something"}},
+		"stream":   true,
+	}
+
+	bodyBytes, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "http://127.0.0.1:8080/v1/chat/completions", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the request and capture the streaming response
+	client = &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to connect to server: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify the response is a stream
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text/event-stream") && !strings.Contains(contentType, "multipart/x-ndjson") {
+		t.Errorf("expected streaming content type, got %s", contentType)
+	}
+
+	// Read and verify the streaming response
+	reader := bufio.NewReader(resp.Body)
+	toolCallFound := false
+	finishReasonFound := false
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("error reading stream: %v", err)
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" || line == "data: [DONE]" {
+			if line == "data: [DONE]" {
+				break
+			}
+			continue
+		}
+
+		// Parse the SSE data
+		if strings.HasPrefix(line, "data: ") {
+			jsonStr := strings.TrimPrefix(line, "data: ")
+			var chunk toolcallfix.ChatCompletionChunk
+			if err := json.Unmarshal([]byte(jsonStr), &chunk); err == nil {
+				// Check for tool_calls in the response
+				if len(chunk.Choices) > 0 && len(chunk.Choices[0].Delta.ToolCalls) > 0 {
+					toolCallFound = true
+					tc := chunk.Choices[0].Delta.ToolCalls[0]
+
+					// Verify the function name and arguments
+					if tc.Function.Name != "search" {
+						t.Errorf("expected function name 'search', got %q", tc.Function.Name)
+					}
+
+					// Parse arguments to verify structure
+					var args map[string]string
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						t.Errorf("failed to parse tool call arguments: %v", err)
+					} else {
+						if args["query"] != "test query" {
+							t.Errorf("expected query argument 'test query', got %q", args["query"])
+						}
+					}
+				}
+
+				// Check for finish_reason
+				if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason == "tool_calls" {
+					finishReasonFound = true
+				}
+			}
+		}
+	}
+
+	// Verify that toolcallfix transformation occurred
+	if !toolCallFound {
+		t.Errorf("expected to find tool_calls in the transformed response")
+	}
+
+	if !finishReasonFound {
+		t.Errorf("expected to find finish_reason 'tool_calls' in the response")
+	}
 }
 
 // TestShouldEnableToolCallFix tests the decision logic for enabling toolcallfix
