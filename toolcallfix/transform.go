@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"regexp"
 	"strings"
 
@@ -360,7 +361,7 @@ func (t *StreamTransformer) createFinishChunk(finishReason *string) ChatCompleti
 }
 
 // TransformStream transforms an entire SSE stream
-func TransformStream(input io.Reader, output io.Writer) error {
+func TransformStream(input io.Reader, output io.Writer, flusher http.Flusher) error {
 	transformer := NewStreamTransformer()
 	scanner := bufio.NewScanner(input)
 
@@ -372,6 +373,7 @@ func TransformStream(input io.Reader, output io.Writer) error {
 		}
 		for _, tLine := range transformed {
 			fmt.Fprintln(output, tLine)
+			flusher.Flush()
 		}
 	}
 

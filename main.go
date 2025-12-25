@@ -433,14 +433,14 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 
 	if enableToolCallFix {
 		vlog("TOOLCALLFIX: transforming stream for model '%s'", model)
-		if err := toolcallfix.TransformStream(resp.Body, w); err != nil {
+		if err := toolcallfix.TransformStream(resp.Body, w, flusher); err != nil {
 			vlog("TOOLCALLFIX: transformation failed: %v", err)
 			// Fallback to direct stream copy
 			_, _ = io.Copy(w, resp.Body)
+			flusher.Flush()
 			return
 		}
 		vlog("TOOLCALLFIX: transformation completed successfully for model '%s'", model)
-		flusher.Flush()
 		return
 	}
 
