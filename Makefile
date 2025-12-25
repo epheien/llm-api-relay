@@ -20,6 +20,7 @@ help:
 	@echo "  build-main     - 构建主服务二进制"
 	@echo "  build-test     - 构建测试工具二进制"
 	@echo "  build-runner   - 构建测试运行器二进制"
+	@echo "  build-linux-amd64 - 交叉编译 Linux x64 二进制"
 	@echo "  clean          - 清理所有构建产物"
 	@echo "  test           - 运行所有测试"
 	@echo "  test-unit      - 运行单元测试"
@@ -77,6 +78,14 @@ build: build-main build-test build-runner
 	@echo "所有二进制文件构建完成!"
 	@echo "生成的文件:"
 	@ls -la $(BIN_DIR)/ 2>/dev/null || echo "检查生成的文件"
+
+# 交叉编译 Linux x64 主服务二进制
+.PHONY: build-linux-amd64
+build-linux-amd64: $(BIN_DIR)
+	@echo "交叉编译 Linux x64 主服务二进制..."
+	GOOS=linux GOARCH=amd64 go build -o $(BIN_DIR)/$(MAIN_BINARY)-linux-amd64 ./main.go
+	@echo "✓ Linux x64 主服务二进制构建完成: $(BIN_DIR)/$(MAIN_BINARY)-linux-amd64"
+	@ls -lh $(BIN_DIR)/$(MAIN_BINARY)-linux-amd64
 
 # 清理构建产物
 .PHONY: clean
