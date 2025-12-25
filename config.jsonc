@@ -1,3 +1,4 @@
+// vim:set ft=jsonc sts=2 sw=2 et:
 {
   // 监听地址（对外提供 OpenAI 兼容 API）
   "listen": "0.0.0.0:8080",
@@ -10,6 +11,11 @@
 
   // 针对不同“入参 model”的参数覆写规则（精确匹配）
   "model_rules": [
+    {
+      "match_model": "glm-4.7",
+      // 为该模型启用 toolcallfix
+      "enable_toolcallfix": true
+    },
     {
       "match_model": "gpt-oss-120b",
       "set": {
