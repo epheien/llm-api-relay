@@ -266,6 +266,7 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 
 	return []string{
 		fmt.Sprintf("data: %s", toolCallJSON),
+		"",
 		fmt.Sprintf("data: %s", finishJSON),
 	}, nil
 }
