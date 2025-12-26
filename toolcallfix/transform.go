@@ -145,6 +145,12 @@ func argsToJSON(args []ToolCallArg) string {
 	return string(jsonBytes)
 }
 
+// data: {"id":"chatcmpl-887db6c4f6e02924","object":"chat.completion.chunk","created":1766605451,"model":"glm-4.7","choices":[{"index":0,"delta":{"content":"：","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+//
+// data: {"id":"chatcmpl-887db6c4f6e02924","object":"chat.completion.chunk","created":1766605451,"model":"glm-4.7","choices":[{"index":0,"delta":{"content":"<tool_call>","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+//
+// data: {"id":"chatcmpl-887db6c4f6e02924","object":"chat.completion.chunk","created":1766605451,"model":"glm-4.7","choices":[{"index":0,"delta":{"content":"grep","reasoning_content":null},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+//
 // TransformLine processes a single SSE line and returns transformed lines
 func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 	line = strings.TrimSpace(line)
@@ -180,6 +186,8 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 
 	// Check for tool call start
 	if strings.Contains(content, "<tool_call>") {
+		log.Println(line)
+
 		t.inToolCall = true
 		t.buffer.Reset()
 
@@ -191,6 +199,7 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 			preChunk := t.createContentChunk(preContent, nil)
 			preJSON, _ := json.Marshal(preChunk)
 			t.buffer.WriteString(content[idx:])
+			log.Println("prestart:", string(preJSON))
 			return []string{fmt.Sprintf("data: %s", preJSON)}, nil
 		}
 
@@ -201,6 +210,7 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 
 	// If we're in a tool call, buffer the content
 	if t.inToolCall {
+		log.Println(line)
 		t.buffer.WriteString(content)
 
 		// Check if tool call is complete
@@ -216,10 +226,12 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 	if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason == "stop" {
 		// If we have buffered content that wasn't a complete tool call, flush it as content
 		if t.buffer.Len() > 0 {
+			log.Println(line)
 			buffered := t.buffer.String()
 			t.buffer.Reset()
 			contentChunk := t.createContentChunk(buffered, chunk.Choices[0].FinishReason)
 			contentJSON, _ := json.Marshal(contentChunk)
+			log.Println("finish:", string(contentJSON))
 			return []string{fmt.Sprintf("data: %s", contentJSON)}, nil
 		}
 	}
@@ -234,6 +246,7 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 	t.buffer.Reset()
 	t.inToolCall = false
 
+	log.Println("flushToolCall:", buffered)
 	// Parse the tool call
 	parsed, err := parseToolCallXML(buffered)
 	if err != nil {
@@ -264,6 +277,9 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 	finishJSON, _ := json.Marshal(finishChunk)
 
 	t.toolCallIndex++
+
+	log.Printf("data: %s", toolCallJSON)
+	log.Printf("data: %s", finishJSON)
 
 	return []string{
 		fmt.Sprintf("data: %s", toolCallJSON),
