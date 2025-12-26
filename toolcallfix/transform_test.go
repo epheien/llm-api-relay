@@ -154,6 +154,148 @@ func TestArgsToJSON(t *testing.T) {
 	}
 }
 
+func TestArgsToJSON_ViewFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []ToolCallArg
+		expected map[string]any
+	}{
+		{
+			name: "view function with limit and offset",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "100"},
+				{Key: "offset", Value: "10"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": float64(100), "offset": float64(10)},
+		},
+		{
+			name: "view function with only limit",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "200"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": float64(200)},
+		},
+		{
+			name: "view function with only offset",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "offset", Value: "50"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "offset": float64(50)},
+		},
+		{
+			name: "view function with non-numeric limit (should keep as string)",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "invalid"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": "invalid"},
+		},
+		{
+			name: "view function with zero values",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "0"},
+				{Key: "offset", Value: "0"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": float64(0), "offset": float64(0)},
+		},
+		{
+			name: "view function with negative values",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "-5"},
+				{Key: "offset", Value: "-10"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": float64(-5), "offset": float64(-10)},
+		},
+		{
+			name: "view function with large numbers",
+			args: []ToolCallArg{
+				{Key: "file_path", Value: "/path/to/file.go"},
+				{Key: "limit", Value: "999999"},
+				{Key: "offset", Value: "123456"},
+			},
+			expected: map[string]any{"file_path": "/path/to/file.go", "limit": float64(999999), "offset": float64(123456)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := argsToJSON("view", tt.args)
+
+			var resultMap map[string]any
+			if err := json.Unmarshal([]byte(result), &resultMap); err != nil {
+				t.Errorf("failed to parse result JSON: %v", err)
+				return
+			}
+
+			if len(resultMap) != len(tt.expected) {
+				t.Errorf("map size mismatch: got %d, want %d", len(resultMap), len(tt.expected))
+				return
+			}
+
+			for k, v := range tt.expected {
+				if resultMap[k] != v {
+					t.Errorf("value mismatch for key %q: got %v (%T), want %v (%T)", k, resultMap[k], resultMap[k], v, v)
+				}
+			}
+		})
+	}
+}
+
+func TestArgsToJSON_NonViewFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		functionName string
+		args     []ToolCallArg
+		expected map[string]any
+	}{
+		{
+			name: "grep function with pattern should keep as string",
+			functionName: "grep",
+			args: []ToolCallArg{
+				{Key: "pattern", Value: "test"},
+				{Key: "include", Value: "*.go"},
+			},
+			expected: map[string]any{"pattern": "test", "include": "*.go"},
+		},
+		{
+			name: "ls function should keep all args as strings",
+			functionName: "ls",
+			args: []ToolCallArg{
+				{Key: "path", Value: "/tmp"},
+			},
+			expected: map[string]any{"path": "/tmp"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := argsToJSON(tt.functionName, tt.args)
+
+			var resultMap map[string]any
+			if err := json.Unmarshal([]byte(result), &resultMap); err != nil {
+				t.Errorf("failed to parse result JSON: %v", err)
+				return
+			}
+
+			if len(resultMap) != len(tt.expected) {
+				t.Errorf("map size mismatch: got %d, want %d", len(resultMap), len(tt.expected))
+				return
+			}
+
+			for k, v := range tt.expected {
+				if resultMap[k] != v {
+					t.Errorf("value mismatch for key %q: got %v (%T), want %v (%T)", k, resultMap[k], resultMap[k], v, v)
+				}
+			}
+		})
+	}
+}
+
 func TestStreamTransformer_SimpleContent(t *testing.T) {
 	transformer := NewStreamTransformer()
 
