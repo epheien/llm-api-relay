@@ -106,7 +106,7 @@ func TestArgsToJSON(t *testing.T) {
 	tests := []struct {
 		name     string
 		args     []ToolCallArg
-		expected map[string]string
+		expected map[string]any
 	}{
 		{
 			name: "two args",
@@ -114,27 +114,27 @@ func TestArgsToJSON(t *testing.T) {
 				{Key: "include", Value: "*.go"},
 				{Key: "pattern", Value: "test"},
 			},
-			expected: map[string]string{"include": "*.go", "pattern": "test"},
+			expected: map[string]any{"include": "*.go", "pattern": "test"},
 		},
 		{
 			name:     "empty args",
 			args:     []ToolCallArg{},
-			expected: map[string]string{},
+			expected: map[string]any{},
 		},
 		{
 			name: "single arg",
 			args: []ToolCallArg{
 				{Key: "file_path", Value: "/path/to/file"},
 			},
-			expected: map[string]string{"file_path": "/path/to/file"},
+			expected: map[string]any{"file_path": "/path/to/file"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := argsToJSON(tt.args)
+			result := argsToJSON("", tt.args)
 
-			var resultMap map[string]string
+			var resultMap map[string]any
 			if err := json.Unmarshal([]byte(result), &resultMap); err != nil {
 				t.Errorf("failed to parse result JSON: %v", err)
 				return
@@ -225,7 +225,7 @@ func TestStreamTransformer_ToolCallInContent(t *testing.T) {
 				t.Errorf("expected function name 'grep', got %q", tc.Function.Name)
 			}
 
-			var args map[string]string
+			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 				t.Errorf("failed to parse arguments: %v", err)
 				continue

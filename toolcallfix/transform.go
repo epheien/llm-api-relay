@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -128,14 +129,32 @@ func parseToolCallXML(xml string) (*ParsedToolCall, error) {
 }
 
 // argsToJSON converts tool call arguments to JSON string
-func argsToJSON(args []ToolCallArg) string {
+func argsToJSON(functionName string, args []ToolCallArg) string {
 	if len(args) == 0 {
 		return "{}"
 	}
 
-	argMap := make(map[string]string)
+	argMap := make(map[string]any)
 	for _, arg := range args {
 		argMap[arg.Key] = arg.Value
+	}
+
+	// Special handling for view function: convert limit and offset to integers
+	if functionName == "view" {
+		if limitVal, ok := argMap["limit"]; ok {
+			if limitStr, ok := limitVal.(string); ok {
+				if intVal, err := strconv.ParseInt(limitStr, 10, 64); err == nil {
+					argMap["limit"] = intVal
+				}
+			}
+		}
+		if offsetVal, ok := argMap["offset"]; ok {
+			if offsetStr, ok := offsetVal.(string); ok {
+				if intVal, err := strconv.ParseInt(offsetStr, 10, 64); err == nil {
+					argMap["offset"] = intVal
+				}
+			}
+		}
 	}
 
 	jsonBytes, err := json.Marshal(argMap)
@@ -337,7 +356,7 @@ func (t *StreamTransformer) createToolCallChunk(parsed *ParsedToolCall) ChatComp
 							Index: t.toolCallIndex,
 							Function: FunctionCall{
 								Name:      parsed.Name,
-								Arguments: argsToJSON(parsed.Args),
+								Arguments: argsToJSON(parsed.Name, parsed.Args),
 							},
 						},
 					},
@@ -376,10 +395,23 @@ func (t *StreamTransformer) createFinishChunk(finishReason *string) ChatCompleti
 	return chunk
 }
 
+// noopFlusher is a no-op implementation of http.Flusher
+type noopFlusher struct{}
+
+func (n *noopFlusher) Flush() {}
+
 // TransformStream transforms an entire SSE stream
-func TransformStream(input io.Reader, output io.Writer, flusher http.Flusher) error {
+func TransformStream(input io.Reader, output io.Writer) error {
 	transformer := NewStreamTransformer()
 	scanner := bufio.NewScanner(input)
+
+	// Check if output implements http.Flusher, otherwise use no-op flusher
+	var flusher http.Flusher
+	if f, ok := output.(http.Flusher); ok {
+		flusher = f
+	} else {
+		flusher = &noopFlusher{}
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
