@@ -134,14 +134,13 @@ func TestGemma4ExtractToolCalls(t *testing.T) {
 			wantArgs:    map[string]any{"location": "London"},
 			wantCalled:  true,
 		},
-		// TODO: 嵌套数组和对象混合解析需要进一步调试
-		// {
-		// 	name:        "nested_arguments",
-		// 	modelOutput: `<|tool_call>call:complex_function{nested:{inner:<|"|>value<|"|>},list:[<|"|>a<|"|>,<|"|>b<|"|>]}<tool_call|>`,
-		// 	wantName:    "complex_function",
-		// 	wantArgs:    map[string]any{"nested": map[string]any{"inner": "value"}, "list": []any{"a", "b"}},
-		// 	wantCalled:  true,
-		// },
+		{
+			name:        "nested_arguments",
+			modelOutput: `<|tool_call>call:complex_function{nested:{inner:<|"|>value<|"|>},list:[<|"|>a<|"|>,<|"|>b<|"|>]}<tool_call|>`,
+			wantName:    "complex_function",
+			wantArgs:    map[string]any{"nested": map[string]any{"inner": "value"}, "list": []any{"a", "b"}},
+			wantCalled:  true,
+		},
 		{
 			name:        "number_and_boolean",
 			modelOutput: `<|tool_call>call:set_status{is_active:true,count:42,score:3.14}<tool_call|>`,

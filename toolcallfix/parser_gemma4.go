@@ -51,6 +51,49 @@ func parseGemma4Value(valueStr string) any {
 	return valueStr
 }
 
+// extractArgsUntilMatch 从指定位置开始，提取到匹配的 } 为止的参数字符串
+// 处理嵌套的大括号，核心算法:
+//
+// 1. 初始化 depth = 1 (表示已遇到一个开括号)
+// 2. 从 start 位置向后遍历:
+//   - 遇到字符串分隔符 <|"|> 时，跳过整个字符串内容，避免字符串内的 } 被误计
+//   - 遇到 { 时 depth++
+//   - 遇到 } 时 depth--
+//   - depth 归零时表示已找到匹配的 }，退出循环
+//
+// 3. 返回从 start 到 (i-1) 的内容(不包含最后的 })
+func extractArgsUntilMatch(s string, start int) (string, error) {
+	depth := 1
+	i := start
+	n := len(s)
+
+	for i < n && depth > 0 {
+		// 检查字符串分隔符，跳过字符串内容
+		if strings.HasPrefix(s[i:], gemma4StringDelim) {
+			i += len(gemma4StringDelim)
+			nextDelim := strings.Index(s[i:], gemma4StringDelim)
+			if nextDelim == -1 {
+				return "", fmt.Errorf("unterminated string")
+			}
+			i = i + nextDelim + len(gemma4StringDelim)
+			continue
+		}
+		if s[i] == '{' {
+			depth++
+		} else if s[i] == '}' {
+			depth--
+		}
+		i++
+	}
+
+	if depth != 0 {
+		return "", fmt.Errorf("mismatched braces")
+	}
+
+	// 返回从 start 到 i-1 (不包括最后的 })
+	return s[start : i-1], nil
+}
+
 // parseGemma4Args 解析 Gemma4 的 key:value 格式为 map (对应 Python 的 _parse_gemma4_args)
 // 支持格式:
 //   - location:<|"|>Tokyo<|"|>
@@ -283,30 +326,44 @@ func (p *gemma4Parser) Parse(content string) (*ParsedToolCall, error) {
 		return nil, fmt.Errorf("empty tool call")
 	}
 
-	// 使用正则提取所有函数名和参数部分
+	// 使用正则提取函数名和开括号位置
 	// 匹配格式: call:func_name{args}
 	// 支持函数名包含字母、数字、下划线、连字符和点
-	funcRe := regexp.MustCompile(`call:([a-zA-Z_][a-zA-Z0-9_\-\.]*)\{(.*?)\}`)
+	//
+	// 为什么不用纯正则提取参数部分?
+	// 原因: Go 的 regexp 包基于 RE2，不支持递归正则或平衡组。
+	// 例如对于 input: `nested:{inner:<|"|>value<|"|>},list:[<|"|>a<|"|>]`
+	// 正则 `\{.*?\}` 只能匹配到第一个 `}`，无法处理嵌套的大括号。
+	//
+	// 解决方案: 使用混合方案
+	// 1. 正则: 只匹配 `call:func_name{` 部分，获取函数名和 { 的位置
+	// 2. 手动解析: 从 { 之后开始，使用大括号计数器匹配到对应的 }
+	//    - 需要跳过字符串分隔符 <|"|>，避免字符串内的 } 被误计
+	//    - 维护大括号深度 depth，depth 归零时即找到匹配的 }
+	funcRe := regexp.MustCompile(`call:([a-zA-Z_][a-zA-Z0-9_\-\.]*)\{`)
+	// 使用 FindAllStringSubmatchIndex 直接获取位置，避免后续 strings.Index 重复查找
+	// 索引格式: [完整开始, 完整结束, 捕获组1开始, 捕获组1结束]
 	matches := funcRe.FindAllStringSubmatch(inner, -1)
+	matchIndices := funcRe.FindAllStringSubmatchIndex(inner, -1)
 
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("invalid gemma4 format: %s", inner)
-	}
-
-	// 处理多个工具调用 - 参考 Python 实现
+	// 手动解析参数，处理嵌套的大括号
 	var toolCalls []ToolCallWithArgs
-
-	for _, match := range matches {
-		if len(match) < 3 {
+	for i, match := range matches {
+		if len(match) < 2 {
 			continue
 		}
 
 		funcName := match[1]
-		argsStr := match[2]
+		// 直接从索引获取位置: matchIndices[i][1] 是完整匹配的结束位置(即 { 之后)
+		argsStart := matchIndices[i][1]
 
-		// 解析参数为 map (保持原生类型)
+		// 手动解析参数，找到匹配的 }
+		argsStr, err := extractArgsUntilMatch(inner, argsStart)
+		if err != nil {
+			continue
+		}
+
 		argsMap := parseGemma4Args(argsStr)
-
 		toolCalls = append(toolCalls, ToolCallWithArgs{
 			Name:      funcName,
 			Arguments: argsMap,
@@ -314,7 +371,7 @@ func (p *gemma4Parser) Parse(content string) (*ParsedToolCall, error) {
 	}
 
 	if len(toolCalls) == 0 {
-		return nil, fmt.Errorf("no valid tool call found")
+		return nil, fmt.Errorf("invalid gemma4 format: %s", inner)
 	}
 
 	// 只返回第一个工具调用 (与原有 ParsedToolCall 结构兼容)
