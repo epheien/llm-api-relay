@@ -28,3 +28,9 @@ func GetParser(name string) ToolCallParser {
 	// 默认返回 XML 解析器
 	return parserRegistry["xml"]
 }
+
+// init 注册内置解析器
+func init() {
+	RegisterParser("xml", &xmlParser{})
+	RegisterParser("gemma4", &gemma4Parser{})
+}
