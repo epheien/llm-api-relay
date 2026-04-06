@@ -37,7 +37,10 @@ func (p *gemma4Parser) Parse(content string) (*ParsedToolCall, error) {
 	argsStr := match[2]
 
 	// 解析参数: key:<|"|>value<|"|>
+	// 格式: key:<|"|>value<|"|>
+	// 在正则表达式中，| 需要转义
 	var args []ToolCallArg
+	// 使用原始字符串避免转义问题
 	argRe := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_\-\.]*):<\|"\|>(.*?)<\|"\|>`)
 	argMatches := argRe.FindAllStringSubmatch(argsStr, -1)
 
