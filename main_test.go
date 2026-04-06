@@ -413,6 +413,182 @@ func createTempFile(content string) (*os.File, error) {
 	return tmpFile, nil
 }
 
+func TestNormalizeUpstream(t *testing.T) {
+	t.Run("string to map", func(t *testing.T) {
+		result, err := normalizeUpstream("http://localhost:8000")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := map[string]string{"default": "http://localhost:8000"}
+		if len(result) != len(expected) || result["default"] != expected["default"] {
+			t.Errorf("expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("map[string]any to map", func(t *testing.T) {
+		input := map[string]any{
+			"glm-5":   "http://192.168.3.244:8002",
+			"glm-4.7": "http://192.168.3.244:8001",
+			"default": "http://192.168.3.244:8000",
+		}
+		result, err := normalizeUpstream(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result["glm-5"] != "http://192.168.3.244:8002" {
+			t.Errorf("expected glm-5 URL, got %s", result["glm-5"])
+		}
+		if result["glm-4.7"] != "http://192.168.3.244:8001" {
+			t.Errorf("expected glm-4.7 URL, got %s", result["glm-4.7"])
+		}
+		if result["default"] != "http://192.168.3.244:8000" {
+			t.Errorf("expected default URL, got %s", result["default"])
+		}
+	})
+
+	t.Run("map[string]string to map", func(t *testing.T) {
+		input := map[string]string{
+			"default": "http://localhost:8000",
+		}
+		result, err := normalizeUpstream(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result["default"] != "http://localhost:8000" {
+			t.Errorf("expected default URL, got %s", result["default"])
+		}
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		_, err := normalizeUpstream(12345)
+		if err == nil {
+			t.Fatal("expected error for invalid type, got nil")
+		}
+		if !strings.Contains(err.Error(), "must be a string or map[string]string") {
+			t.Errorf("unexpected error message: %s", err.Error())
+		}
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		_, err := normalizeUpstream(nil)
+		if err == nil {
+			t.Fatal("expected error for nil, got nil")
+		}
+		if !strings.Contains(err.Error(), "must be a string or map[string]string") {
+			t.Errorf("unexpected error message: %s", err.Error())
+		}
+	})
+}
+
+func TestResolveUpstream(t *testing.T) {
+	upstreamMap := map[string]string{
+		"glm-5":   "http://192.168.3.244:8002",
+		"glm-4.7": "http://192.168.3.244:8001",
+		"default": "http://192.168.3.244:8000",
+	}
+
+	t.Run("exact match", func(t *testing.T) {
+		url, err := resolveUpstream(upstreamMap, "glm-5")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if url != "http://192.168.3.244:8002" {
+			t.Errorf("expected http://192.168.3.244:8002, got %s", url)
+		}
+	})
+
+	t.Run("fallback to default", func(t *testing.T) {
+		url, err := resolveUpstream(upstreamMap, "unknown-model")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if url != "http://192.168.3.244:8000" {
+			t.Errorf("expected default URL, got %s", url)
+		}
+	})
+
+	t.Run("no default fallback", func(t *testing.T) {
+		noDefaultMap := map[string]string{
+			"glm-5": "http://192.168.3.244:8002",
+		}
+		_, err := resolveUpstream(noDefaultMap, "unknown-model")
+		if err == nil {
+			t.Fatal("expected error when no upstream configured, got nil")
+		}
+		if !strings.Contains(err.Error(), "no upstream configured for model") {
+			t.Errorf("unexpected error message: %s", err.Error())
+		}
+	})
+}
+
+func TestLoadConfigJSONCUpstreamMap(t *testing.T) {
+	t.Run("upstream as map", func(t *testing.T) {
+		configJSON := `{
+			"listen": ":8080",
+			"upstream": {
+				"glm-5": "http://192.168.3.244:8002",
+				"glm-4.7": "http://192.168.3.244:8001",
+				"default": "http://192.168.3.244:8000"
+			},
+			"forward_auth": false
+		}`
+
+		tmpFile, err := createTempFile(configJSON)
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		defer cleanupTempFile(tmpFile)
+
+		cfg, err := loadConfigJSONC(tmpFile.Name())
+		if err != nil {
+			t.Fatalf("loadConfigJSONC() failed: %v", err)
+		}
+
+		upstreamMap, ok := cfg.Upstream.(map[string]string)
+		if !ok {
+			t.Fatalf("expected Upstream to be map[string]string, got %T", cfg.Upstream)
+		}
+
+		if upstreamMap["glm-5"] != "http://192.168.3.244:8002" {
+			t.Errorf("expected glm-5 URL, got %s", upstreamMap["glm-5"])
+		}
+		if upstreamMap["glm-4.7"] != "http://192.168.3.244:8001" {
+			t.Errorf("expected glm-4.7 URL, got %s", upstreamMap["glm-4.7"])
+		}
+		if upstreamMap["default"] != "http://192.168.3.244:8000" {
+			t.Errorf("expected default URL, got %s", upstreamMap["default"])
+		}
+	})
+
+	t.Run("upstream as string converts to map", func(t *testing.T) {
+		configJSON := `{
+			"listen": ":8080",
+			"upstream": "http://localhost:8000",
+			"forward_auth": false
+		}`
+
+		tmpFile, err := createTempFile(configJSON)
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		defer cleanupTempFile(tmpFile)
+
+		cfg, err := loadConfigJSONC(tmpFile.Name())
+		if err != nil {
+			t.Fatalf("loadConfigJSONC() failed: %v", err)
+		}
+
+		upstreamMap, ok := cfg.Upstream.(map[string]string)
+		if !ok {
+			t.Fatalf("expected Upstream to be map[string]string, got %T", cfg.Upstream)
+		}
+
+		if upstreamMap["default"] != "http://localhost:8000" {
+			t.Errorf("expected default URL, got %s", upstreamMap["default"])
+		}
+	})
+}
+
 func cleanupTempFile(f *os.File) {
 	if f != nil {
 		f.Close()
