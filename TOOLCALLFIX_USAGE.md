@@ -122,6 +122,31 @@ ToolCallFix 是一个流式响应转换器，用于将嵌入在 OpenAI 流式响
 }
 ```
 
+## 解析器配置
+
+使用 `tool_call_parser` 指定工具调用解析器：
+
+### 支持的解析器
+
+| 解析器 | 格式 | 示例 |
+|--------|------|------|
+| `xml` (默认) | XML 标签格式 | `<tool_call>func<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` |
+| `gemma4` | Gemma4 格式 | `<\|tool_call>call:func{k:<\|"\|>v<\|"\|>}<tool_call\|>` |
+
+### 配置示例
+
+```jsonc
+{
+  "match_model": "gemma4-model",
+  "enable_toolcallfix": true,
+  "tool_call_parser": "gemma4"
+}
+```
+
+### 默认行为
+
+如果不指定 `tool_call_parser`，默认使用 `xml` 解析器（保持向后兼容）。
+
 ## 日志输出
 
 使用 `--verbose` 模式可以看到 toolcallfix 的详细日志：
@@ -133,8 +158,8 @@ ToolCallFix 是一个流式响应转换器，用于将嵌入在 OpenAI 流式响
 日志示例：
 ```
 2025/12/25 13:44:22 TOOLCALLFIX: processing model 'qwen2.5-72b-instruct'
-2025/12/25 13:44:22 TOOLCALLFIX: using rule 'qwen2.5-72b-instruct': enable=true
-2025/12/25 13:44:22 TOOLCALLFIX: transforming stream for model 'qwen2.5-72b-instruct'
+2025/12/25 13:44:22 TOOLCALLFIX: using rule 'qwen2.5-72b-instruct': enable=true, parser=xml
+2025/12/25 13:44:22 TOOLCALLFIX: transforming stream for model 'qwen2.5-72b-instruct' with parser 'xml'
 ```
 
 ## 错误处理
