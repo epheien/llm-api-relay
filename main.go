@@ -21,9 +21,31 @@ import (
 
 type Config struct {
 	Listen      string      `json:"listen"`
-	Upstream    string      `json:"upstream"`
+	Upstream    any         `json:"upstream"` // 支持 string 或 map[string]string
 	ForwardAuth bool        `json:"forward_auth"`
 	ModelRules  []ModelRule `json:"model_rules"`
+}
+
+// normalizeUpstream 将 upstream 规范化为 map[string]string
+func normalizeUpstream(upstream any) (map[string]string, error) {
+	switch v := upstream.(type) {
+	case string:
+		return map[string]string{"default": v}, nil
+	case map[string]any:
+		result := make(map[string]string)
+		for k, vv := range v {
+			if s, ok := vv.(string); ok {
+				result[k] = s
+			} else {
+				return nil, fmt.Errorf("upstream value for key '%s' must be a string, got %T", k, vv)
+			}
+		}
+		return result, nil
+	case map[string]string:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("upstream must be a string or map[string]string, got %T", upstream)
+	}
 }
 
 type ModelRule struct {
@@ -68,16 +90,14 @@ func main() {
 		log.Fatalf("load config failed: %v", err)
 	}
 
-	up, err := url.Parse(cfg.Upstream)
-	if err != nil {
-		log.Fatalf("invalid upstream: %v", err)
-	}
+	// upstream 已经是规范化后的 map[string]string
+	upstreamMap := cfg.Upstream.(map[string]string)
 
 	mux := http.NewServeMux()
 
 	// OpenAI compatible endpoints
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		proxyPassthrough(w, r, up, cfg.ForwardAuth, nil)
+		proxyPassthrough(w, r, upstreamMap, cfg.ForwardAuth, nil)
 	})
 
 	patcher := func(req map[string]any) {
@@ -85,11 +105,11 @@ func main() {
 	}
 
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, cfg, patcher)
+		proxyWithJSONPatch(w, r, upstreamMap, cfg.ForwardAuth, cfg, patcher)
 	})
 
 	mux.HandleFunc("/v1/completions", func(w http.ResponseWriter, r *http.Request) {
-		proxyWithJSONPatch(w, r, up, cfg.ForwardAuth, cfg, patcher)
+		proxyWithJSONPatch(w, r, upstreamMap, cfg.ForwardAuth, cfg, patcher)
 	})
 
 	// health
@@ -124,11 +144,16 @@ func loadConfigJSONC(path string) (*Config, error) {
 	if err := hjson.Unmarshal(b, &cfg); err != nil {
 		return nil, err
 	}
+
+	// 规范化 upstream 为 map[string]string
+	normalized, err := normalizeUpstream(cfg.Upstream)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Upstream = normalized
+
 	if cfg.Listen == "" {
 		cfg.Listen = ":8080"
-	}
-	if cfg.Upstream == "" {
-		return nil, errors.New("upstream is required")
 	}
 	return &cfg, nil
 }
@@ -201,6 +226,19 @@ func getString(m map[string]any, key string) string {
 	return ""
 }
 
+// resolveUpstream 根据 model 名称解析对应的 upstream URL
+func resolveUpstream(upstream map[string]string, model string) (string, error) {
+	// 精确匹配
+	if url, ok := upstream[model]; ok {
+		return url, nil
+	}
+	// 回退到 default
+	if url, ok := upstream["default"]; ok {
+		return url, nil
+	}
+	return "", fmt.Errorf("no upstream configured for model '%s' and no default upstream", model)
+}
+
 // shouldEnableToolCallFix determines whether to enable toolcallfix for a given model
 func shouldEnableToolCallFix(cfg *Config, model string) bool {
 	// Find exact match rule
@@ -222,8 +260,20 @@ func shouldEnableToolCallFix(cfg *Config, model string) bool {
 }
 
 // proxyPassthrough forwards request to upstream (no body patch).
-func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL, forwardAuth bool, newBody io.Reader) {
-	target := upstream.ResolveReference(r.URL)
+func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream map[string]string, forwardAuth bool, newBody io.Reader) {
+	// /v1/models 没有 model 参数，使用 default
+	upstreamURL, ok := upstream["default"]
+	if !ok {
+		http.Error(w, "no default upstream configured", http.StatusBadGateway)
+		return
+	}
+	up, err := url.Parse(upstreamURL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid upstream URL: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	target := up.ResolveReference(r.URL)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), newBody)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -232,7 +282,7 @@ func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL,
 
 	copyHeaders(req.Header, r.Header)
 	// Host should be upstream host
-	req.Host = upstream.Host
+	req.Host = up.Host
 
 	if !forwardAuth {
 		req.Header.Del("Authorization")
@@ -267,7 +317,7 @@ func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL,
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.URL, forwardAuth bool, cfg *Config, patch func(map[string]any)) {
+func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[string]string, forwardAuth bool, cfg *Config, patch func(map[string]any)) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -286,7 +336,20 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 		return
 	}
 
-	// patch request json
+	// 解析 upstream URL（基于原始 model，在 applyRules 之前）
+	model := getString(payload, "model")
+	upstreamURL, err := resolveUpstream(upstream, model)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	up, err := url.Parse(upstreamURL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid upstream URL: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	// patch request json（可能改变 model 名称）
 	if patch != nil {
 		patch(payload)
 	}
@@ -303,7 +366,7 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 		stream = true
 	}
 
-	target := upstream.ResolveReference(r.URL)
+	target := up.ResolveReference(r.URL)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), bytes.NewReader(patched))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -311,7 +374,7 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 	}
 
 	copyHeaders(req.Header, r.Header)
-	req.Host = upstream.Host
+	req.Host = up.Host
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(patched)))
 
@@ -341,10 +404,8 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream *url.UR
 		return
 	}
 
-	// Extract model name for toolcallfix decision
-	model := getString(payload, "model")
-
 	// Check if toolcallfix should be enabled for this model
+	// 注意：model 已经是经过 applyRules 转换后的值
 	enableToolCallFix := shouldEnableToolCallFix(cfg, model)
 
 	// streaming: copy line by line (works for SSE) but still safe for chunked bytes

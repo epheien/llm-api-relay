@@ -501,7 +501,8 @@ func TestProxyWithJSONPatchWithToolCallFix(t *testing.T) {
 	r := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 
 	// Call proxyWithJSONPatch
-	proxyWithJSONPatch(w, r, parseURL(upstream.URL), false, cfg, nil)
+	upstreamMap := map[string]string{"default": upstream.URL}
+	proxyWithJSONPatch(w, r, upstreamMap, false, cfg, nil)
 
 	// Verify response
 	resp := w.Result()

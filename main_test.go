@@ -40,8 +40,13 @@ func TestLoadConfigJSONC(t *testing.T) {
 		if cfg.Listen != ":8080" {
 			t.Errorf("expected Listen ':8080', got %q", cfg.Listen)
 		}
-		if cfg.Upstream != "http://localhost:11434/v1" {
-			t.Errorf("expected Upstream 'http://localhost:11434/v1', got %q", cfg.Upstream)
+		// upstream 被规范化为 map[string]string
+		upstreamMap, ok := cfg.Upstream.(map[string]string)
+		if !ok {
+			t.Fatalf("expected Upstream to be map[string]string, got %T", cfg.Upstream)
+		}
+		if upstreamMap["default"] != "http://localhost:11434/v1" {
+			t.Errorf("expected Upstream['default'] 'http://localhost:11434/v1', got %q", upstreamMap["default"])
 		}
 		if cfg.ForwardAuth != false {
 			t.Errorf("expected ForwardAuth false, got %v", cfg.ForwardAuth)
@@ -352,6 +357,7 @@ func TestProxyPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	upstreamURL := parseURLTest(upstream.URL)
+	upstreamMap := map[string]string{"default": upstreamURL.String()}
 
 	t.Run("forward auth disabled", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test/path", nil)
@@ -360,7 +366,7 @@ func TestProxyPassthrough(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		proxyPassthrough(w, req, upstreamURL, false, nil)
+		proxyPassthrough(w, req, upstreamMap, false, nil)
 
 		resp := w.Result()
 		if resp.StatusCode != http.StatusOK {
@@ -385,7 +391,7 @@ func TestProxyPassthrough(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		proxyPassthrough(w, req, upstreamURL, true, nil)
+		proxyPassthrough(w, req, upstreamMap, true, nil)
 
 		resp := w.Result()
 		if resp.StatusCode != http.StatusOK {
