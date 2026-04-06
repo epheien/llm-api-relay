@@ -71,15 +71,18 @@ type ParsedToolCall struct {
 // StreamTransformer transforms streams with embedded tool calls in content
 // to proper OpenAI-style tool_calls format
 type StreamTransformer struct {
+	parser        ToolCallParser
 	buffer        strings.Builder
 	inToolCall    bool
 	lastChunk     *ChatCompletionChunk
 	toolCallIndex int
 }
 
-// NewStreamTransformer creates a new StreamTransformer
-func NewStreamTransformer() *StreamTransformer {
-	return &StreamTransformer{}
+// NewStreamTransformer creates a new StreamTransformer with the specified parser
+func NewStreamTransformer(parserName string) *StreamTransformer {
+	return &StreamTransformer{
+		parser: GetParser(parserName),
+	}
 }
 
 // parseToolCallXML parses the XML format tool call into structured data
@@ -166,14 +169,14 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 	content := chunk.Choices[0].Delta.Content
 
 	// Check for tool call start
-	if strings.Contains(content, "<tool_call>") {
+	if strings.Contains(content, t.parser.StartTag()) {
 		log.Println(line)
 
 		t.inToolCall = true
 		t.buffer.Reset()
 
-		// Check if there's content before <tool_call>
-		idx := strings.Index(content, "<tool_call>")
+		// Check if there's content before the tool call start tag
+		idx := strings.Index(content, t.parser.StartTag())
 		if idx > 0 {
 			// Output the content before the tool call
 			preContent := content[:idx]
@@ -195,7 +198,7 @@ func (t *StreamTransformer) TransformLine(line string) ([]string, error) {
 		t.buffer.WriteString(content)
 
 		// Check if tool call is complete
-		if strings.Contains(t.buffer.String(), "</tool_call>") {
+		if strings.Contains(t.buffer.String(), t.parser.EndTag()) {
 			return t.flushToolCall()
 		}
 
@@ -228,8 +231,8 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 	t.inToolCall = false
 
 	log.Println("flushToolCall:", buffered)
-	// Parse the tool call
-	parsed, err := parseToolCallXML(buffered)
+	// Parse the tool call using the configured parser
+	parsed, err := t.parser.Parse(buffered)
 	if err != nil {
 		// If parsing fails, return as regular content
 		log.Printf("TOOLCALLFIX: failed to parse tool call (invalid XML format), returning as regular content: %v", err)
@@ -363,8 +366,8 @@ type noopFlusher struct{}
 func (n *noopFlusher) Flush() {}
 
 // TransformStream transforms an entire SSE stream
-func TransformStream(input io.Reader, output io.Writer) error {
-	transformer := NewStreamTransformer()
+func TransformStream(input io.Reader, output io.Writer, parserName string) error {
+	transformer := NewStreamTransformer(parserName)
 	scanner := bufio.NewScanner(input)
 
 	// Check if output implements http.Flusher, otherwise use no-op flusher
