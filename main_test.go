@@ -11,75 +11,6 @@ import (
 	"testing"
 )
 
-func TestStripJSONC(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "single line comment",
-			input:    `{"key": "value"} // this is a comment`,
-			expected: `{"key": "value"} `,
-		},
-		{
-			name:     "multi line comment",
-			input:    `{"key": "value"} /* this is a block comment */`,
-			expected: `{"key": "value"} `,
-		},
-		{
-			name:     "line comment within string",
-			input:    `{"key": "value with // inside"} // real comment`,
-			expected: `{"key": "value with // inside"} `,
-		},
-		{
-			name:     "block comment within string",
-			input:    `{"key": "value with /* inside */ string"} /* comment */`,
-			expected: `{"key": "value with /* inside */ string"} `,
-		},
-		{
-			name: "multiple comments",
-			input: `{"key": "value"} // comment 1
-			{"key2": "value2"} // comment 2`,
-			expected: `{"key": "value"} 
-			{"key2": "value2"} `,
-		},
-		{
-			name: "complex block comment",
-			input: `{
-				"listen": ":8080", // port config
-				/* block comment
-				   across multiple lines */
-				"upstream": "http://example.com"
-			}`,
-			expected: `{
-				"listen": ":8080", 
-				
-				"upstream": "http://example.com"
-			}`,
-		},
-		{
-			name:     "nested block comments",
-			input:    `{"key": "value"} /* outer /* inner */ outer */ end`,
-			expected: `{"key": "value"}  outer */ end`,
-		},
-		{
-			name:     "no comments",
-			input:    `{"key": "value", "array": [1, 2, 3]}`,
-			expected: `{"key": "value", "array": [1, 2, 3]}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := stripJSONC(tt.input)
-			if result != tt.expected {
-				t.Errorf("stripJSONC() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestLoadConfigJSONC(t *testing.T) {
 	// Test successful parsing
 	t.Run("valid config", func(t *testing.T) {
@@ -160,12 +91,13 @@ func TestLoadConfigJSONC(t *testing.T) {
 		}
 	})
 
-	// Test invalid JSON
+	// Test invalid JSON (syntax error that hjson cannot parse)
 	t.Run("invalid JSON", func(t *testing.T) {
+		// hjson allows comments, but this has actual syntax errors
 		configJSON := `{
-			"listen": ":8080",
-			"upstream": "http://example.com",
-			// missing closing brace
+			"listen": ":8080"
+			"upstream": "http://example.com"
+			invalid syntax here
 		}`
 
 		tmpFile, err := createTempFile(configJSON)

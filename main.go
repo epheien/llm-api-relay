@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	hjson "github.com/hjson/hjson-go/v4"
 	"llm-api-relay/toolcallfix"
 )
 
@@ -119,9 +120,8 @@ func loadConfigJSONC(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	clean := stripJSONC(string(b))
 	var cfg Config
-	if err := json.Unmarshal([]byte(clean), &cfg); err != nil {
+	if err := hjson.Unmarshal(b, &cfg); err != nil {
 		return nil, err
 	}
 	if cfg.Listen == "" {
@@ -131,82 +131,6 @@ func loadConfigJSONC(path string) (*Config, error) {
 		return nil, errors.New("upstream is required")
 	}
 	return &cfg, nil
-}
-
-// stripJSONC removes // line comments and /* block comments */.
-// It’s simple and pragmatic for config use.
-func stripJSONC(s string) string {
-	var out strings.Builder
-	out.Grow(len(s))
-
-	inString := false
-	escape := false
-	inLineComment := false
-	inBlockComment := false
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-
-		// end line comment
-		if inLineComment {
-			if c == '\n' {
-				inLineComment = false
-				out.WriteByte(c)
-			}
-			continue
-		}
-
-		// end block comment
-		if inBlockComment {
-			if c == '*' && i+1 < len(s) && s[i+1] == '/' {
-				inBlockComment = false
-				i++
-			}
-			continue
-		}
-
-		// handle string state
-		if inString {
-			out.WriteByte(c)
-			if escape {
-				escape = false
-				continue
-			}
-			if c == '\\' {
-				escape = true
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-
-		// not in string/comment
-		if c == '"' {
-			inString = true
-			out.WriteByte(c)
-			continue
-		}
-
-		// start comments
-		if c == '/' && i+1 < len(s) {
-			n := s[i+1]
-			if n == '/' {
-				inLineComment = true
-				i++
-				continue
-			}
-			if n == '*' {
-				inBlockComment = true
-				i++
-				continue
-			}
-		}
-
-		out.WriteByte(c)
-	}
-	return out.String()
 }
 
 func applyRules(cfg *Config, req map[string]any) {

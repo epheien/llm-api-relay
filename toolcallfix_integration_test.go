@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	hjson "github.com/hjson/hjson-go/v4"
 	"llm-api-relay/toolcallfix"
 )
 
@@ -379,9 +380,8 @@ func TestConfigWithToolCallFix(t *testing.T) {
 		]
 	}`
 
-	clean := stripJSONC(configJSON)
 	var cfg Config
-	if err := json.Unmarshal([]byte(clean), &cfg); err != nil {
+	if err := hjson.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
 
@@ -436,9 +436,8 @@ func TestConfigWithoutToolCallFix(t *testing.T) {
 		]
 	}`
 
-	clean := stripJSONC(configJSON)
 	var cfg Config
-	if err := json.Unmarshal([]byte(clean), &cfg); err != nil {
+	if err := hjson.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
 
