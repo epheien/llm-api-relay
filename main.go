@@ -54,6 +54,7 @@ type ModelRule struct {
 	Extra             map[string]any `json:"extra"`              // merge into request["extra"] (object)
 	Unset             []string       `json:"unset"`              // remove fields at top-level
 	EnableToolCallFix bool           `json:"enable_toolcallfix"` // enable/disable toolcallfix per model
+	ToolCallParser    string         `json:"tool_call_parser"`   // tool call parser name: "xml" (default), "gemma4"
 }
 
 var verboseMode bool
@@ -240,7 +241,8 @@ func resolveUpstream(upstream map[string]string, model string) (string, error) {
 }
 
 // shouldEnableToolCallFix determines whether to enable toolcallfix for a given model
-func shouldEnableToolCallFix(cfg *Config, model string) bool {
+// getToolCallFixConfig returns whether toolcallfix is enabled and which parser to use
+func getToolCallFixConfig(cfg *Config, model string) (enable bool, parserName string) {
 	// Find exact match rule
 	rule := findRule(cfg.ModelRules, model)
 	if rule == nil {
@@ -250,13 +252,23 @@ func shouldEnableToolCallFix(cfg *Config, model string) bool {
 	}
 
 	if rule != nil {
-		vlog("TOOLCALLFIX: using rule '%s': enable=%v", rule.MatchModel, rule.EnableToolCallFix)
-		return rule.EnableToolCallFix
+		parserName = rule.ToolCallParser
+		if parserName == "" {
+			parserName = "xml" // default parser
+		}
+		vlog("TOOLCALLFIX: using rule '%s': enable=%v, parser=%s", rule.MatchModel, rule.EnableToolCallFix, parserName)
+		return rule.EnableToolCallFix, parserName
 	}
 
 	// Default to disabled (no rule found for this model)
 	vlog("TOOLCALLFIX: no rule found for '%s', defaulting to disabled", model)
-	return false
+	return false, "xml"
+}
+
+// Deprecated: Use getToolCallFixConfig instead
+func shouldEnableToolCallFix(cfg *Config, model string) bool {
+	enable, _ := getToolCallFixConfig(cfg, model)
+	return enable
 }
 
 // proxyPassthrough forwards request to upstream (no body patch).
@@ -406,7 +418,7 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[str
 
 	// Check if toolcallfix should be enabled for this model
 	// 注意：model 已经是经过 applyRules 转换后的值
-	enableToolCallFix := shouldEnableToolCallFix(cfg, model)
+	enableToolCallFix, parserName := getToolCallFixConfig(cfg, model)
 
 	// streaming: copy line by line (works for SSE) but still safe for chunked bytes
 	flusher, ok := w.(http.Flusher)
@@ -417,8 +429,8 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[str
 	}
 
 	if enableToolCallFix {
-		vlog("TOOLCALLFIX: transforming stream for model '%s'", model)
-		if err := toolcallfix.TransformStream(resp.Body, w); err != nil {
+		vlog("TOOLCALLFIX: transforming stream for model '%s' with parser '%s'", model, parserName)
+		if err := toolcallfix.TransformStream(resp.Body, w, parserName); err != nil {
 			vlog("TOOLCALLFIX: transformation failed: %v", err)
 			// Fallback to direct stream copy
 			_, _ = io.Copy(w, resp.Body)
