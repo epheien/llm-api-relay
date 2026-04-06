@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -85,47 +84,10 @@ func NewStreamTransformer() *StreamTransformer {
 
 // parseToolCallXML parses the XML format tool call into structured data
 // Format: <tool_call>name<arg_key>key1</arg_key><arg_value>value1</arg_value>...</tool_call>
+// Deprecated: Use xmlParser.Parse instead. Kept for backward compatibility during migration.
 func parseToolCallXML(xml string) (*ParsedToolCall, error) {
-	// Remove the outer tags
-	inner := strings.TrimPrefix(xml, "<tool_call>")
-	inner = strings.TrimSuffix(inner, "</tool_call>")
-	inner = strings.TrimSpace(inner)
-
-	if inner == "" {
-		return nil, fmt.Errorf("empty tool call")
-	}
-
-	// Extract function name (everything before the first <arg_key>)
-	argKeyIndex := strings.Index(inner, "<arg_key>")
-	var name string
-	var argsSection string
-
-	if argKeyIndex == -1 {
-		name = strings.TrimSpace(inner)
-		argsSection = ""
-	} else {
-		name = strings.TrimSpace(inner[:argKeyIndex])
-		argsSection = inner[argKeyIndex:]
-	}
-
-	// Parse arguments using (?s) flag to allow . to match newlines
-	var args []ToolCallArg
-	argKeyRe := regexp.MustCompile(`(?s)<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>`)
-	matches := argKeyRe.FindAllStringSubmatch(argsSection, -1)
-
-	for _, match := range matches {
-		if len(match) == 3 {
-			args = append(args, ToolCallArg{
-				Key:   strings.TrimSpace(match[1]), // 键名可以 TrimSpace
-				Value: match[2],                    // 值保持原样
-			})
-		}
-	}
-
-	return &ParsedToolCall{
-		Name: name,
-		Args: args,
-	}, nil
+	p := &xmlParser{}
+	return p.Parse(xml)
 }
 
 // argsToJSON converts tool call arguments to JSON string
