@@ -37,14 +37,42 @@
 
 ```go
 type Config struct {
-    Listen      string            `json:"listen"`
-    Upstream    map[string]string `json:"upstream"`  // 改为 map
-    ForwardAuth bool              `json:"forward_auth"`
-    ModelRules  []ModelRule       `json:"model_rules"`
+    Listen      string         `json:"listen"`
+    Upstream    any            `json:"upstream"` // 支持 string 或 map[string]string
+    ForwardAuth bool           `json:"forward_auth"`
+    ModelRules  []ModelRule    `json:"model_rules"`
 }
 ```
 
-### 2. 配置解析修改
+### 2. normalizeUpstream 函数
+
+将 upstream 规范化为 map[string]string：
+
+```go
+// normalizeUpstream 将 upstream 规范化为 map[string]string
+func normalizeUpstream(upstream any) (map[string]string, error) {
+    switch v := upstream.(type) {
+    case string:
+        return map[string]string{"default": v}, nil
+    case map[string]any:
+        result := make(map[string]string)
+        for k, vv := range v {
+            if s, ok := vv.(string); ok {
+                result[k] = s
+            } else {
+                return nil, fmt.Errorf("upstream value for key '%s' must be a string, got %T", k, vv)
+            }
+        }
+        return result, nil
+    case map[string]string:
+        return v, nil
+    default:
+        return nil, fmt.Errorf("upstream must be a string or map[string]string, got %T", upstream)
+    }
+}
+```
+
+### 3. 配置解析修改
 
 `loadConfigJSONC` 函数中增加兼容处理：
 
@@ -97,7 +125,7 @@ func loadConfigJSONC(path string) (*Config, error) {
 }
 ```
 
-### 3. 新增路由解析函数
+### 4. 新增路由解析函数
 
 ```go
 // resolveUpstream 根据 model 名称解析对应的 upstream URL
@@ -114,7 +142,7 @@ func resolveUpstream(upstream map[string]string, model string) (string, error) {
 }
 ```
 
-### 4. 路由调用位置
+### 5. 路由调用位置
 
 在 `proxyWithJSONPatch` 函数中，读取 payload 后立即解析 upstream：
 
@@ -147,7 +175,7 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[str
 }
 ```
 
-### 5. handler 修改
+### 6. handler 修改
 
 `main.go` 中各端点的 handler 需要调整，不再传递 `*url.URL` 而是传递 `map[string]string`：
 
