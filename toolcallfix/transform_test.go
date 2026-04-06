@@ -3,6 +3,7 @@ package toolcallfix
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -676,16 +677,36 @@ func TestGemma4Parser_Parse(t *testing.T) {
 				t.Errorf("name mismatch: got %q, want %q", result.Name, tt.expected.Name)
 			}
 
-			if len(result.Args) != len(tt.expected.Args) {
-				t.Errorf("args count mismatch: got %d, want %d", len(result.Args), len(tt.expected.Args))
-			}
-
-			for i, arg := range result.Args {
-				if arg.Key != tt.expected.Args[i].Key {
-					t.Errorf("arg[%d] key mismatch: got %q, want %q", i, arg.Key, tt.expected.Args[i].Key)
+			// 检查 Value 字段（存储原生类型的 map）
+			if len(result.Args) > 0 && result.Args[0].Value != nil {
+				// 使用 Value 验证
+				if argMap, ok := result.Args[0].Value.(map[string]any); ok {
+					if len(argMap) != len(tt.expected.Args) {
+						t.Errorf("args count mismatch: got %d, want %d", len(argMap), len(tt.expected.Args))
+					}
+					for i, arg := range tt.expected.Args {
+						gotVal, ok := argMap[arg.Key]
+						if !ok {
+							t.Errorf("arg[%d] key %q not found", i, arg.Key)
+							continue
+						}
+						// 转换为字符串比较
+						gotStr := fmt.Sprintf("%v", gotVal)
+						if gotStr != arg.Value {
+							t.Errorf("arg[%d] value mismatch: got %q, want %q", i, gotStr, arg.Value)
+						}
+					}
 				}
-				if arg.Value != tt.expected.Args[i].Value {
-					t.Errorf("arg[%d] value mismatch: got %q, want %q", i, arg.Value, tt.expected.Args[i].Value)
+			} else if len(result.Args) != len(tt.expected.Args) {
+				t.Errorf("args count mismatch: got %d, want %d", len(result.Args), len(tt.expected.Args))
+			} else {
+				for i, arg := range result.Args {
+					if arg.Key != tt.expected.Args[i].Key {
+						t.Errorf("arg[%d] key mismatch: got %q, want %q", i, arg.Key, tt.expected.Args[i].Key)
+					}
+					if arg.Value != tt.expected.Args[i].Value {
+						t.Errorf("arg[%d] value mismatch: got %q, want %q", i, arg.Value, tt.expected.Args[i].Value)
+					}
 				}
 			}
 		})

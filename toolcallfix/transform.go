@@ -59,7 +59,7 @@ type Usage struct {
 // ToolCallArg represents a parsed argument from the XML format
 type ToolCallArg struct {
 	Key   string
-	Value string
+	Value any // 支持原生类型: string, bool, int, float64, map, slice
 }
 
 // ParsedToolCall represents a parsed tool call from the XML format
@@ -99,6 +99,7 @@ func argsToJSON(functionName string, args []ToolCallArg) string {
 		return "{}"
 	}
 
+	// 从 Args 切片构建 map，Value 直接是 any 类型
 	argMap := make(map[string]any)
 	for _, arg := range args {
 		argMap[arg.Key] = arg.Value
@@ -247,7 +248,7 @@ func (t *StreamTransformer) flushToolCall() ([]string, error) {
 		if i > 0 {
 			argsStr += ", "
 		}
-		argsStr += fmt.Sprintf("%s=%s", arg.Key, arg.Value)
+		argsStr += fmt.Sprintf("%s=%v", arg.Key, arg.Value)
 	}
 	log.Printf("TOOLCALLFIX: successfully transformed tool call - name: %s, arguments: [%s]", parsed.Name, argsStr)
 
