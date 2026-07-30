@@ -121,7 +121,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           loggingMiddleware(mux),
+		Handler:           loggingMiddleware(corsMiddleware(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on %s, upstream=%s", cfg.Listen, cfg.Upstream)
@@ -133,6 +133,23 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start))
+	})
+}
+
+// corsMiddleware adds permissive CORS headers and short-circuits OPTIONS
+// preflight requests so browser clients can call the relay cross-origin.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", "*")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		h.Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -317,8 +334,13 @@ func proxyPassthrough(w http.ResponseWriter, r *http.Request, upstream map[strin
 	}
 	defer resp.Body.Close()
 
-	// copy response headers
+	// copy response headers (skip CORS headers that corsMiddleware already set;
+	// upstream may also emit them when we forward the client's Origin header,
+	// which would create duplicate Access-Control-Allow-* values browsers reject)
 	for k, vv := range resp.Header {
+		if isCorsHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -402,8 +424,11 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[str
 	}
 	defer resp.Body.Close()
 
-	// copy response headers
+	// copy response headers (skip CORS headers; see proxyPassthrough)
 	for k, vv := range resp.Header {
+		if isCorsHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -458,8 +483,28 @@ func proxyWithJSONPatch(w http.ResponseWriter, r *http.Request, upstream map[str
 	}
 }
 
+// isCorsHeader reports whether k is a CORS response header. Such headers are
+// set by corsMiddleware and must be dropped from upstream responses to avoid
+// duplicates that browsers reject.
+func isCorsHeader(k string) bool {
+	switch strings.ToLower(k) {
+	case "access-control-allow-origin",
+		"access-control-allow-methods",
+		"access-control-allow-headers",
+		"access-control-allow-credentials",
+		"access-control-max-age",
+		"access-control-expose-headers":
+		return true
+	}
+	return false
+}
+
 func copyHeaders(dst, src http.Header) {
-	// copy all headers, but avoid hop-by-hop headers
+	// copy all headers, but avoid hop-by-hop headers.
+	// Note: this is used for request headers (client -> upstream). Browsers never
+	// send CORS *response* headers (Access-Control-Allow-*) as request headers, so
+	// isCorsHeader() is not applied here. The Origin request header IS forwarded,
+	// which the response-side logic in proxyChat/proxyComplete relies on.
 	hop := map[string]struct{}{
 		"Connection":          {},
 		"Proxy-Connection":    {},
